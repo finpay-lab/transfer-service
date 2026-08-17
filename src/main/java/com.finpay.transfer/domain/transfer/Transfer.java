@@ -14,6 +14,11 @@ import java.util.UUID;
  *
  * <p>Idempotency (AGENTS.md Rule 6): a transfer is created with a
  * client-supplied idempotency key; at most one transfer may exist per key.
+ *
+ * <p>Crash recovery (ADR-0003): the whole saga state lives in
+ * {@link SagaExecutionState} and is persisted on every step transition, so a
+ * crash at any point can be resumed deterministically by re-driving the
+ * persisted state.
  */
 public final class Transfer {
 
@@ -28,7 +33,7 @@ public final class Transfer {
     private final Instant createdAt;
 
     private TransferStatus status;
-    private SagaStep sagaStep;
+    private final SagaExecutionState execution;
 
     private Transfer(
             UUID transferId,
@@ -39,7 +44,7 @@ public final class Transfer {
             String idempotencyKey,
             Instant createdAt,
             TransferStatus status,
-            SagaStep sagaStep) {
+            SagaExecutionState execution) {
         this.transferId = transferId;
         this.sourceAccountId = sourceAccountId;
         this.destinationAccountId = destinationAccountId;
@@ -48,7 +53,7 @@ public final class Transfer {
         this.idempotencyKey = idempotencyKey;
         this.createdAt = createdAt;
         this.status = status;
-        this.sagaStep = sagaStep;
+        this.execution = execution;
     }
 
     /** Creates a new transfer in its initial saga state (CREATED / VALIDATION). */
@@ -62,12 +67,13 @@ public final class Transfer {
             Instant createdAt) {
         validate(transferId, sourceAccountId, destinationAccountId, amount, currency, idempotencyKey, createdAt);
         return new Transfer(transferId, sourceAccountId, destinationAccountId, amount,
-                currency, idempotencyKey, createdAt, TransferStatus.CREATED, SagaStep.VALIDATION);
+                currency, idempotencyKey, createdAt, TransferStatus.CREATED,
+                SagaExecutionState.initial(createdAt));
     }
 
     /**
      * Rehydrates a transfer from persistence, preserving its current status
-     * and saga step (unlike {@link #create}, which starts a fresh saga).
+     * and saga state (unlike {@link #create}, which starts a fresh saga).
      */
     public static Transfer restore(
             UUID transferId,
@@ -78,13 +84,42 @@ public final class Transfer {
             String idempotencyKey,
             Instant createdAt,
             TransferStatus status,
-            SagaStep sagaStep) {
+            SagaStep sagaStep,
+            Set<SagaStep> executedSteps,
+            Set<SagaStep> compensatedSteps,
+            boolean compensating,
+            UUID reservationId,
+            String failureReason,
+            SagaStep failedAtStep,
+            Instant updatedAt) {
         validate(transferId, sourceAccountId, destinationAccountId, amount, currency, idempotencyKey, createdAt);
-        if (status == null || sagaStep == null) {
-            throw new IllegalArgumentException("status and sagaStep must not be null");
+        if (status == null) {
+            throw new IllegalArgumentException("status must not be null");
+        }
+        if (sagaStep == null || updatedAt == null) {
+            throw new IllegalArgumentException("sagaStep and updatedAt must not be null");
         }
         return new Transfer(transferId, sourceAccountId, destinationAccountId, amount,
-                currency, idempotencyKey, createdAt, status, sagaStep);
+                currency, idempotencyKey, createdAt, status,
+                SagaExecutionState.restore(
+                        sagaStep, executedSteps, compensatedSteps, compensating,
+                        reservationId, failureReason, failedAtStep, updatedAt));
+    }
+
+    /** Backward-compatible restore without saga step state (fresh step log). */
+    public static Transfer restore(
+            UUID transferId,
+            UUID sourceAccountId,
+            UUID destinationAccountId,
+            BigDecimal amount,
+            String currency,
+            String idempotencyKey,
+            Instant createdAt,
+            TransferStatus status,
+            SagaStep sagaStep) {
+        return restore(transferId, sourceAccountId, destinationAccountId, amount, currency,
+                idempotencyKey, createdAt, status, sagaStep, Set.of(), Set.of(),
+                false, null, null, null, createdAt);
     }
 
     private static void validate(
@@ -121,6 +156,16 @@ public final class Transfer {
             throw new IllegalTransferStateTransitionException(status, newStatus);
         }
         status = newStatus;
+    }
+
+    /** Marks the saga terminal-successful (all money-flow steps executed). */
+    public void complete(Instant now) {
+        transitionTo(TransferStatus.COMPLETED);
+    }
+
+    /** Marks the saga terminal-failed after compensation completed. */
+    public void fail(Instant now) {
+        transitionTo(TransferStatus.FAILED);
     }
 
     /**
@@ -175,7 +220,16 @@ public final class Transfer {
         return status;
     }
 
+    public SagaExecutionState execution() {
+        return execution;
+    }
+
     public SagaStep sagaStep() {
-        return sagaStep;
+        return execution.sagaStep();
+    }
+
+    /** True once the transfer reached a terminal status (COMPLETED / FAILED / REVERSED). */
+    public boolean isTerminal() {
+        return status != TransferStatus.CREATED;
     }
 }

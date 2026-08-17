@@ -15,6 +15,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -29,10 +30,14 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * <p>Verifies the full contract (AGENTS.md Rule 6): 201 on creation, 200
  * replay for the same key/payload, 409 conflict for the same key with a
  * different payload, and exactly one outbox row for the single transfer.
+ *
+ * <p>The scheduled saga-recovery job is disabled so it cannot advance transfers
+ * (and add outbox rows) between assertions.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Testcontainers(disabledWithoutDocker = true)
+@TestPropertySource(properties = "transfer.saga.recovery.enabled=false")
 class TransferIdempotencyIntegrationTest {
 
     @Container

@@ -14,3 +14,9 @@ spring:
       ddl-auto: none
   flyway:
     enabled: true
+
+transfer:
+  saga:
+    recovery:
+      initial-delay-ms: 1000
+      interval-ms: 5000

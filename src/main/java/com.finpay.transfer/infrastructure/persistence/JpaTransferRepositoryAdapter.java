@@ -1,10 +1,19 @@
 package com.finpay.transfer.infrastructure.persistence;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.finpay.transfer.domain.transfer.DuplicateIdempotencyKeyException;
+import com.finpay.transfer.domain.transfer.SagaExecutionState;
+import com.finpay.transfer.domain.transfer.SagaStep;
 import com.finpay.transfer.domain.transfer.Transfer;
 import com.finpay.transfer.domain.transfer.TransferRepository;
+import com.finpay.transfer.domain.transfer.TransferStatus;
 
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
@@ -16,14 +25,28 @@ import org.springframework.transaction.annotation.Transactional;
  * transfer per key: {@link #save(Transfer)} flushes eagerly so a concurrent
  * duplicate surfaces here as a {@link DataIntegrityViolationException} and is
  * translated to the domain {@link DuplicateIdempotencyKeyException}.
+ *
+ * <p>Saga state (executed/compensated step sets, compensation flag, failure
+ * info) is persisted as JSONB columns on the transfer row — the whole saga
+ * state survives a crash and can be resumed (ADR-0003).
  */
 @Repository
 public class JpaTransferRepositoryAdapter implements TransferRepository {
 
     private final TransferJpaRepository jpaRepository;
+    private final ObjectMapper objectMapper;
 
-    public JpaTransferRepositoryAdapter(TransferJpaRepository jpaRepository) {
+    public JpaTransferRepositoryAdapter(
+            TransferJpaRepository jpaRepository,
+            ObjectMapper objectMapper) {
         this.jpaRepository = jpaRepository;
+        this.objectMapper = objectMapper;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Transfer> findById(UUID transferId) {
+        return jpaRepository.findById(transferId).map(this::toDomain);
     }
 
     @Override
@@ -43,7 +66,17 @@ public class JpaTransferRepositoryAdapter implements TransferRepository {
         return jpaRepository.findByIdempotencyKey(idempotencyKey).map(this::toDomain);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<Transfer> findNonTerminal(int limit) {
+        return jpaRepository.findByStatusOrderByUpdatedAtAsc(TransferStatus.CREATED).stream()
+                .limit(limit)
+                .map(this::toDomain)
+                .toList();
+    }
+
     private TransferJpaEntity toEntity(Transfer transfer) {
+        SagaExecutionState execution = transfer.execution();
         return new TransferJpaEntity(
                 transfer.transferId(),
                 transfer.sourceAccountId(),
@@ -51,9 +84,16 @@ public class JpaTransferRepositoryAdapter implements TransferRepository {
                 transfer.amount(),
                 transfer.currency(),
                 transfer.status(),
-                transfer.sagaStep(),
+                execution.sagaStep(),
                 transfer.idempotencyKey(),
-                transfer.createdAt());
+                transfer.createdAt(),
+                execution.updatedAt(),
+                execution.reservationId(),
+                execution.failureReason(),
+                execution.failedAtStep(),
+                execution.isCompensating(),
+                writeSteps(execution.executedSteps()),
+                writeSteps(execution.compensatedSteps()));
     }
 
     private Transfer toDomain(TransferJpaEntity entity) {
@@ -66,6 +106,30 @@ public class JpaTransferRepositoryAdapter implements TransferRepository {
                 entity.idempotencyKey(),
                 entity.createdAt(),
                 entity.status(),
-                entity.sagaStep());
+                entity.sagaStep(),
+                readSteps(entity.executedSteps()),
+                readSteps(entity.compensatedSteps()),
+                entity.compensating(),
+                entity.reservationId(),
+                entity.failureReason(),
+                entity.failedAtStep(),
+                entity.updatedAt());
+    }
+
+    private String writeSteps(Set<SagaStep> steps) {
+        try {
+            return objectMapper.writeValueAsString(steps);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize saga steps", e);
+        }
+    }
+
+    private Set<SagaStep> readSteps(String json) {
+        try {
+            return objectMapper.readValue(json, new TypeReference<Set<SagaStep>>() {
+            });
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to deserialize saga steps", e);
+        }
     }
 }

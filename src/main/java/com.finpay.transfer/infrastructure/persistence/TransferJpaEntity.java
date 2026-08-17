@@ -54,6 +54,28 @@ public class TransferJpaEntity {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
+    @Column(name = "reservation_id", columnDefinition = "uuid")
+    private UUID reservationId;
+
+    @Column(name = "failure_reason", length = 512)
+    private String failureReason;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "failed_at_step", length = 32)
+    private SagaStep failedAtStep;
+
+    @Column(name = "compensating", nullable = false)
+    private boolean compensating;
+
+    @Column(name = "executed_steps", columnDefinition = "jsonb", nullable = false)
+    private String executedSteps;
+
+    @Column(name = "compensated_steps", columnDefinition = "jsonb", nullable = false)
+    private String compensatedSteps;
+
     protected TransferJpaEntity() {
         // JPA
     }
@@ -67,7 +89,14 @@ public class TransferJpaEntity {
             TransferStatus status,
             SagaStep sagaStep,
             String idempotencyKey,
-            Instant createdAt) {
+            Instant createdAt,
+            Instant updatedAt,
+            UUID reservationId,
+            String failureReason,
+            SagaStep failedAtStep,
+            boolean compensating,
+            String executedSteps,
+            String compensatedSteps) {
         this.transferId = transferId;
         this.sourceAccountId = sourceAccountId;
         this.destinationAccountId = destinationAccountId;
@@ -77,6 +106,13 @@ public class TransferJpaEntity {
         this.sagaStep = sagaStep;
         this.idempotencyKey = idempotencyKey;
         this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
+        this.reservationId = reservationId;
+        this.failureReason = failureReason;
+        this.failedAtStep = failedAtStep;
+        this.compensating = compensating;
+        this.executedSteps = executedSteps;
+        this.compensatedSteps = compensatedSteps;
     }
 
     public UUID transferId() {
@@ -113,5 +149,33 @@ public class TransferJpaEntity {
 
     public Instant createdAt() {
         return createdAt;
+    }
+
+    public Instant updatedAt() {
+        return updatedAt;
+    }
+
+    public UUID reservationId() {
+        return reservationId;
+    }
+
+    public String failureReason() {
+        return failureReason;
+    }
+
+    public SagaStep failedAtStep() {
+        return failedAtStep;
+    }
+
+    public boolean compensating() {
+        return compensating;
+    }
+
+    public String executedSteps() {
+        return executedSteps;
+    }
+
+    public String compensatedSteps() {
+        return compensatedSteps;
     }
 }
