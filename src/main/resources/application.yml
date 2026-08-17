@@ -1,5 +1,46 @@
 server:
   port: 8080
+
 spring:
   application:
     name: transfer-service
+  datasource:
+    url: ${TRANSFER_DB_URL:jdbc:postgresql://localhost:5432/transfer}
+    username: ${TRANSFER_DB_USER:transfer}
+    password: ${TRANSFER_DB_PASSWORD:transfer}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+transfer:
+  saga:
+    recovery:
+      initial-delay-ms: 1000
+      interval-ms: 5000
+
+finpay:
+  saga:
+    # in-memory = lab stand-ins for the external services (default);
+    # http      = call customer/account/limit/risk/wallet/ledger over HTTP.
+    remote-mode: ${SAGA_REMOTE_MODE:in-memory}
+  remote:
+    # Timeout/retry for remote saga steps (AGENTS.md Rule 8).
+    connect-timeout-ms: 2000
+    read-timeout-ms: 5000
+    max-attempts: 3
+    backoff-ms: 200
+    customer:
+      base-url: ${CUSTOMER_SERVICE_URL:http://localhost:8081}
+    account:
+      base-url: ${ACCOUNT_SERVICE_URL:http://localhost:8082}
+    limit:
+      base-url: ${LIMIT_SERVICE_URL:http://localhost:8083}
+    risk:
+      base-url: ${RISK_SERVICE_URL:http://localhost:8084}
+    wallet:
+      base-url: ${WALLET_SERVICE_URL:http://localhost:8085}
+    ledger:
+      base-url: ${LEDGER_SERVICE_URL:http://localhost:8086}
