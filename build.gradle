@@ -15,5 +15,15 @@ jar {
 
 dependencies {
     implementation libs.spring.boot.starter.web
+    implementation libs.spring.boot.starter.validation
+    implementation libs.spring.boot.starter.data.jpa
     implementation libs.common.web
+
+    runtimeOnly libs.postgresql
+    runtimeOnly libs.flyway.core
+    runtimeOnly libs.flyway.database.postgresql
+
+    testImplementation libs.spring.boot.starter.test
+    testImplementation libs.testcontainers.postgresql
+    testImplementation libs.common.test
 }
